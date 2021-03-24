@@ -3,6 +3,7 @@ const Chat = require('../models/chat');
 const Session = require('../models/session');
 const { botMessages } = require('../constants');
 const getQuote = require('../utils/kanye.rest');
+const { notifySubscribers } = require('../subscriptionHandlers');
 const {
   constantStrings: {
     session: {
@@ -109,6 +110,7 @@ const handleStartMessage = async (message, telegramBot) => {
         });
         user.chat.sessions.push(session._id)
         user.chat.save()
+        notifySubscribers(chat_id, msgObj)
       }
       sendMessage(telegramBot, chat_id, botMessages.start, session)
     }).catch(e => console.log('error', e));
@@ -125,7 +127,9 @@ const handleFreeTextMessage = (message, telegramBot) => {
       if (!response || !response.data || !response.data.quote) {
         return sendMessage(telegramBot, chat_id, botMessages.internalError);
       }
-      chat.sessions[0].messages.push(buildMessageObj(text, USER, message_id, timestamp));
+      const messageObj = buildMessageObj(text, USER, message_id, timestamp)
+      chat.sessions[0].messages.push(messageObj);
+      notifySubscribers(chat_id, messageObj)
       sendMessage(telegramBot, chat_id, botMessages.freeText(response.data.quote), chat.sessions[0]);
     })
     .catch(e => console.log('error', e))
@@ -162,8 +166,10 @@ const handleGetInfoMessage = (message, telegramBot) => {
         messagesCounter += session.messages.filter(m => m.sender === USER).length
       });
       const totalTime = (time.reduce((sum, cur) => sum + cur ,0))
-      const averageInMilli = time.length ? totalTime / time.length : 0 ;
-      openSession.messages.push(buildMessageObj(text, USER, message_id, timestamp))
+      const averageInMilli = time.length ? totalTime / time.length : 0;
+      const messageObj = buildMessageObj(text, USER, message_id, timestamp)
+      openSession.messages.push(messageObj);
+      notifySubscribers(chat_id, messageObj)
       sendMessage(telegramBot, chat_id, botMessages.getInfo(averageInMilli, messagesCounter),openSession)
     })
     .catch(e => console.log('error', e));
@@ -176,7 +182,9 @@ const handleEndMessage = (message, telegramBot) => {
       if (!validateChatOpenSessionModel(chat, chat_id)) {
         return ;
       }
-      chat.sessions[0].messages.push(buildMessageObj(text, USER, message_id, timestamp))
+      const messageObj = buildMessageObj(text, USER, message_id, timestamp)
+      chat.sessions[0].messages.push(messageObj)
+      notifySubscribers(chat_id, messageObj);
       sendMessage(telegramBot, chat_id, botMessages.end, chat.sessions[0], true);
     })
     .catch(e => console.log('error', e));
@@ -190,7 +198,9 @@ const handleFallbackMessage = (message, telegramBot) => {
 const sendMessage = (telegramBot, chatId, message, sessionModel = null, closeSession = false) => {
   telegramBot.sendMessage(chatId, message);
   if (sessionModel){
-    sessionModel.messages.push(buildMessageObj(message,BOT));
+    const messageObj = buildMessageObj(message,BOT);
+    notifySubscribers(chatId, messageObj);
+    sessionModel.messages.push(messageObj);
     if (closeSession) sessionModel.status = CLOSE
     sessionModel.save();
   }
